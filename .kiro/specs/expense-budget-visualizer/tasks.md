@@ -107,7 +107,7 @@ Build a single-page, client-side expense tracker as three static files (`index.h
     - `#chart-empty-state` styled to replace the canvas gracefully when no data exists
     - _Requirements: 5.5, 5.6, 5.7, 4.5, 4.6_
 
-- [-] 12. Final checkpoint — Ensure all tests pass
+- [x] 12. Final checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ---

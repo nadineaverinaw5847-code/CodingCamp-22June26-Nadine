@@ -58,10 +58,10 @@ function renderList(txArray) {
     badge.setAttribute('aria-label', t.category);
     badge.textContent = config.icon;
 
-    // Item name (full name; CSS handles truncation)
+    // Item name (truncated to 30 chars + ellipsis if longer; CSS text-overflow provides additional visual clamping)
     const nameSpan = document.createElement('span');
     nameSpan.className = 'transaction-name';
-    nameSpan.textContent = t.name;
+    nameSpan.textContent = t.name.length > 30 ? t.name.slice(0, 30) + '\u2026' : t.name;
 
     // Amount formatted to 2 d.p. with $ prefix
     const amountSpan = document.createElement('span');
