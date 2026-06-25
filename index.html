@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expense &amp; Budget Visualizer</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="js/app.js" defer></script>
+</head>
+<body>
+
+  <header>
+    <h1>Expense &amp; Budget Visualizer</h1>
+    <div id="balance-display">$0.00</div>
+  </header>
+
+  <main>
+    <section id="form-section">
+      <form id="transaction-form">
+        <div class="field-group">
+          <label for="item-name">Item Name</label>
+          <input
+            type="text"
+            id="item-name"
+            name="item-name"
+            maxlength="100"
+            placeholder="e.g. Grocery shopping"
+            autocomplete="off"
+          />
+          <span class="field-error" id="name-error" role="alert"></span>
+        </div>
+
+        <div class="field-group">
+          <label for="item-amount">Amount ($)</label>
+          <input
+            type="number"
+            id="item-amount"
+            name="item-amount"
+            min="0.01"
+            max="999999999.99"
+            step="0.01"
+            placeholder="0.00"
+          />
+          <span class="field-error" id="amount-error" role="alert"></span>
+        </div>
+
+        <div class="field-group">
+          <label for="item-category">Category</label>
+          <select id="item-category" name="item-category">
+            <option value="" disabled selected>Select a category</option>
+            <option value="Food">🍔 Food</option>
+            <option value="Transport">🚌 Transport</option>
+            <option value="Fun">🎉 Fun</option>
+          </select>
+          <span class="field-error" id="category-error" role="alert"></span>
+        </div>
+
+        <button type="submit" id="add-btn">Add Transaction</button>
+      </form>
+    </section>
+
+    <section id="list-section">
+      <h2>Transactions</h2>
+      <ul id="transaction-list">
+        <p id="empty-message">No transactions recorded yet.</p>
+      </ul>
+    </section>
+
+    <section id="chart-section">
+      <h2>Spending Distribution</h2>
+      <canvas id="spending-chart"></canvas>
+      <div id="chart-empty-state">No spending data yet.</div>
+    </section>
+  </main>
+
+  <div id="toast-container" aria-live="polite"></div>
+
+</body>
+</html>

@@ -1,0 +1,471 @@
+/* css/styles.css — Expense & Budget Visualizer styles */
+
+/* ============================================================
+   TASK 11.1 — Base reset, typography, layout
+   ============================================================ */
+
+/* --- Box-sizing reset --- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* --- Root / Body --- */
+:root {
+  --color-bg:        #f5f7fa;
+  --color-surface:   #ffffff;
+  --color-border:    #e0e0e0;
+  --color-text:      #1a1a2e;
+  --color-muted:     #6b7280;
+  --color-primary:   #4f46e5;
+  --color-primary-h: #4338ca;
+  --color-danger:    #dc2626;
+  --radius-sm:       4px;
+  --radius-md:       8px;
+  --shadow-sm:       0 1px 3px rgba(0,0,0,.08);
+  --shadow-md:       0 4px 12px rgba(0,0,0,.1);
+
+  /* Typographic scale (heading > body > label/small) */
+  --fs-h1:    clamp(1.4rem, 4vw, 2rem);   /* largest */
+  --fs-h2:    clamp(1.1rem, 2.5vw, 1.35rem);
+  --fs-body:  1rem;                        /* 16 px */
+  --fs-label: 0.875rem;                    /* 14 px — labels/small */
+  --fs-small: 0.8rem;                      /* 12.8 px — errors/meta */
+}
+
+html {
+  /* Prevent horizontal overflow at every tested width */
+  overflow-x: hidden;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  line-height: 1.5;
+  min-height: 100dvh;
+  /* Prevent any child from causing a horizontal scrollbar */
+  overflow-x: hidden;
+}
+
+/* --- Typographic scale --- */
+h1 {
+  font-size: var(--fs-h1);   /* LARGEST — heading */
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: var(--fs-h2);   /* mid-scale — section headings */
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--color-text);
+}
+
+label {
+  font-size: var(--fs-label); /* SMALLEST scale — labels */
+  font-weight: 500;
+  color: var(--color-muted);
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+/* --- Header --- */
+header {
+  background-color: var(--color-primary);
+  color: #fff;
+  padding: 0.875rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  /* Ensure header never causes horizontal overflow */
+  width: 100%;
+  overflow: hidden;
+}
+
+header h1 {
+  color: #fff;
+}
+
+/* --- Balance Display (always visible in initial viewport) --- */
+#balance-display {
+  font-size: clamp(1.1rem, 3vw, 1.5rem);
+  font-weight: 700;
+  background-color: rgba(255, 255, 255, 0.15);
+  padding: 0.3rem 0.85rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* --- Main layout: default = narrow/mobile, stack vertically --- */
+main {
+  display: grid;
+  /* Single column by default (< 640 px) */
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "form"
+    "list"
+    "chart";
+  gap: 1rem;
+  padding: 1rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* --- Responsive two-column layout: ≥ 640 px --- */
+@media (min-width: 640px) {
+  main {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "form  list"
+      "chart chart";
+  }
+}
+
+/* --- Section base styling --- */
+#form-section  { grid-area: form;  }
+#list-section  { grid-area: list;  }
+#chart-section { grid-area: chart; }
+
+#form-section,
+#list-section,
+#chart-section {
+  background-color: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
+  /* Prevent sections from overflowing their grid cell */
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ============================================================
+   TASK 11.2 — Form fields, field errors, and list styles
+   ============================================================ */
+
+/* --- Form field groups --- */
+.field-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 1rem;
+}
+
+/* --- Inputs and select --- */
+#transaction-form input,
+#transaction-form select {
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  background-color: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  width: 100%;
+  transition: border-color 0.15s;
+  /* Prevent overflow on narrow viewports */
+  max-width: 100%;
+  /* Ensure inputs never stretch beyond their container */
+  box-sizing: border-box;
+}
+
+#transaction-form input:focus,
+#transaction-form select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+}
+
+/* Highlight input borders when their sibling error span has content */
+#transaction-form input:has(+ .field-error:not(:empty)),
+#transaction-form select:has(+ .field-error:not(:empty)) {
+  border-color: var(--color-danger);
+}
+
+/* Remove number input spinners on Firefox */
+#transaction-form input[type="number"] {
+  -moz-appearance: textfield;
+}
+#transaction-form input[type="number"]::-webkit-inner-spin-button,
+#transaction-form input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+/* --- Inline field-error messages ---
+   Visible beneath each field with red text, small icon prefix,
+   and a subtle background so they stand out clearly on validation failure. */
+.field-error {
+  font-size: var(--fs-small);
+  color: var(--color-danger);
+  font-weight: 500;
+  margin-top: 0.3rem;
+  min-height: 1.1em;
+  display: block;
+  line-height: 1.4;
+  /* Reserve space so layout doesn't jump when errors appear/disappear */
+}
+
+.field-error:not(:empty) {
+  background-color: #fef2f2;
+  border-left: 3px solid var(--color-danger);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* --- Submit button --- */
+#add-btn {
+  display: block;
+  width: 100%;
+  padding: 0.65rem 1rem;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s, transform 0.1s;
+  margin-top: 0.25rem;
+}
+
+#add-btn:hover {
+  background-color: var(--color-primary-h);
+}
+
+#add-btn:active {
+  transform: scale(0.98);
+}
+
+/* --- Transaction List container --- */
+#transaction-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 400px;
+  overflow-y: auto;
+  /* Hard stop: never allow the list itself to scroll horizontally */
+  overflow-x: hidden;
+  width: 100%;
+}
+
+#empty-message {
+  margin: 1rem 0.75rem;
+  color: #888;
+  font-style: italic;
+  font-size: 0.95rem;
+}
+
+/* --- Transaction list item ---
+   Flex row: [badge] [name — grows & truncates] [amount] [×]
+   min-width: 0 on the container is critical — without it a flex child
+   can overflow even when overflow: hidden is set.                       */
+.transaction-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  /* CRITICAL: allow flex children to shrink below their content width */
+  min-width: 0;
+  /* Never let a single item create a horizontal scrollbar */
+  overflow: hidden;
+  width: 100%;
+}
+
+/* --- Category badge — colour-coded circular pill with emoji icon.
+   Requirement 8.3: must use BOTH colour AND iconography, not colour alone.
+   Background colour comes from JS (CATEGORY_CONFIG); CSS defines shape/size. */
+.category-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Fixed size so badge never grows and squeezes the name column */
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;   /* prevent shrinking on very narrow viewports */
+  border-radius: 50%;
+  font-size: 1rem;
+  /* Never participate in flex shrink — badge always stays visible */
+  flex-shrink: 0;
+}
+
+/* CSS fallback colours (JS inline style takes precedence) */
+.category-badge[aria-label="Food"]      { background-color: #FF6384; }
+.category-badge[aria-label="Transport"] { background-color: #36A2EB; }
+.category-badge[aria-label="Fun"]       { background-color: #FFCE56; }
+
+/* --- Transaction name — ellipsis truncation (Requirement 2.1, 8.4) ---
+   flex: 1 makes the name column absorb all available space;
+   the overflow+ellipsis rules then clamp it visually.
+   max-width: 30ch caps the column at ~30 characters wide.               */
+.transaction-name {
+  flex: 1 1 0;          /* grow to fill space; also allowed to shrink to 0 */
+  min-width: 0;         /* override default min-width: auto so shrink works */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 30ch;
+  font-size: var(--fs-body);
+}
+
+/* --- Transaction amount --- */
+.transaction-amount {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: var(--fs-body);
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+/* --- Delete button --- */
+.delete-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1.5px solid #ccc;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0.15rem 0.45rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #666;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.delete-btn:hover {
+  background-color: #fee;
+  border-color: #f99;
+  color: #c00;
+}
+
+.delete-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   TASK 11.3 — Toast notifications and chart empty state
+   ============================================================ */
+
+/* --- Toast Notification System --- */
+#toast-container {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  /* Never wider than the viewport minus some breathing room */
+  max-width: min(20rem, calc(100vw - 2.5rem));
+  /* Keep toasts inside the viewport on narrow screens */
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  border-left: 4px solid transparent;
+  background-color: #fff;
+  box-shadow: var(--shadow-md);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  word-break: break-word;
+  animation: toast-in 0.2s ease-out;
+  pointer-events: auto;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(0.5rem); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Warning toast — amber / amber-dark text */
+.toast--warning {
+  border-left-color: #f59e0b;
+  background-color: #fffbeb;
+  color: #92400e;
+}
+
+/* Error toast — red / red-dark text */
+.toast--error {
+  border-left-color: #ef4444;
+  background-color: #fef2f2;
+  color: #991b1b;
+}
+
+/* Close / Dismiss button inside toast */
+.toast button[aria-label="Dismiss"] {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0;
+  color: inherit;
+  opacity: 0.65;
+  /* Make the hit-target large enough to click easily */
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: opacity 0.12s, background-color 0.12s;
+}
+
+.toast button[aria-label="Dismiss"]:hover {
+  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.toast button[aria-label="Dismiss"]:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* --- Chart empty state --- */
+#chart-section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+#spending-chart {
+  /* Canvas is managed by Chart.js; limit height so the chart is proportional */
+  max-height: 340px;
+  width: 100% !important;
+}
+
+#chart-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: 2rem 1.5rem;
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: #fafafa;
+  color: var(--color-muted);
+  font-size: var(--fs-label);
+  font-style: italic;
+  text-align: center;
+  /* JS toggles display: block/none; we override to flex when visible */
+}
+
+/* When JS sets display:block, override to flex so centring still works */
+#chart-empty-state[style*="display: block"],
+#chart-empty-state[style*="display:block"] {
+  display: flex !important;
+}

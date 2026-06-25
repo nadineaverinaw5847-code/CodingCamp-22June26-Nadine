@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expense &amp; Budget Visualizer — Test Suite</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem 2rem; background: #f5f7fa; color: #1a1a2e; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    #summary { font-size: 1.1rem; font-weight: 600; margin: 1rem 0; padding: 0.75rem 1rem; border-radius: 8px; }
+    #summary.all-pass { background: #d1fae5; color: #065f46; border-left: 4px solid #059669; }
+    #summary.has-fail  { background: #fee2e2; color: #991b1b; border-left: 4px solid #dc2626; }
+    .section { margin: 1.25rem 0; }
+    .section h2 { font-size: 1.05rem; margin-bottom: 0.4rem; color: #4f46e5; border-bottom: 1px solid #e0e0e0; padding-bottom: 0.3rem; }
+    .test-row { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.3rem 0.4rem; border-radius: 4px; font-size: 0.88rem; margin: 2px 0; }
+    .test-row.pass { background: #ecfdf5; }
+    .test-row.fail { background: #fef2f2; }
+    .badge { flex-shrink: 0; font-weight: 700; font-size: 0.78rem; padding: 0.1rem 0.4rem; border-radius: 999px; }
+    .badge.pass { background: #059669; color: #fff; }
+    .badge.fail { background: #dc2626; color: #fff; }
+    .test-name { flex: 1; }
+    .test-detail { font-size: 0.78rem; color: #6b7280; margin-top: 2px; }
+    .test-error { color: #991b1b; font-size: 0.78rem; margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
+    #hidden-dom { display: none; }
+  </style>
+</head>
+<body>
+<h1>Expense &amp; Budget Visualizer — Test Suite</h1>
+<div id="summary">Running tests…</div>
+<div id="results"></div>
+
+<!-- Minimal hidden DOM fixtures used by DOM-dependent tests -->
+<div id="hidden-dom">
+  <div id="toast-container" aria-live="polite"></div>
+  <ul id="transaction-list"></ul>
+  <div id="balance-display">$0.00</div>
+  <canvas id="spending-chart"></canvas>
+  <div id="chart-empty-state">No spending data yet.</div>
+  <p id="empty-message"></p>
+  <form id="transaction-form">
+    <input type="text"   id="item-name"     maxlength="100" />
+    <span class="field-error" id="name-error"></span>
+    <input type="number" id="item-amount"   min="0.01" max="999999999.99" step="0.01" />
+    <span class="field-error" id="amount-error"></span>
+    <select id="item-category">
+      <option value="" disabled selected>Select a category</option>
+      <option value="Food">🍔 Food</option>
+      <option value="Transport">🚌 Transport</option>
+      <option value="Fun">🎉 Fun</option>
+    </select>
+    <span class="field-error" id="category-error"></span>
+    <button type="submit" id="add-btn">Add Transaction</button>
+  </form>
+</div>
+
+<!-- fast-check via CDN (ESM) -->
+<script type="module">
+// ─────────────────────────────────────────────────────────────────
+// Import fast-check
+// ─────────────────────────────────────────────────────────────────
+import * as fc from 'https://cdn.jsdelivr.net/npm/fast-check@3/+esm';
+
+// ─────────────────────────────────────────────────────────────────
+// ── INLINED PURE FUNCTIONS FROM app.js ──────────────────────────
+// These are copied verbatim so tests run without importing app.js
+// (which has defer + DOM side-effects on DOMContentLoaded).
+// ─────────────────────────────────────────────────────────────────
+
+const CATEGORY_CONFIG = {
+  Food:      { icon: '🍔', colour: '#FF6384' },
+  Transport: { icon: '🚌', colour: '#36A2EB' },
+  Fun:       { icon: '🎉', colour: '#FFCE56' }
+};
+
+const VALID_CATEGORIES = ['Food', 'Transport', 'Fun'];
+
+// --- generateId ---
+function generateId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return String(Date.now()) + '-' + String(Math.random()).slice(2);
+}
+
+// --- isLocalStorageAvailable ---
+function isLocalStorageAvailable() {
+  try {
+    localStorage.setItem('__ls_test__', '1');
+    localStorage.removeItem('__ls_test__');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// --- showToast (uses hidden-dom fixture) ---
+function showToast(message, type) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'toast toast--' + type;
+  toast.setAttribute('data-test-toast', type);
+  toast.textContent = message;
+  const closeBtn = document.createElement('button');
+  closeBtn.setAttribute('aria-label', 'Dismiss');
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', function () {
+    if (toast.parentNode) toast.parentNode.removeChild(toast);
+  });
+  toast.appendChild(closeBtn);
+  container.appendChild(toast);
+  setTimeout(function () {
+    if (toast.parentNode) toast.parentNode.removeChild(toast);
+  }, 5000);
+}
+
+// --- validateForm ---
+function validateForm(name, amount, category) {
+  const errors = {};
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    errors.name = 'Item name is required and cannot be empty.';
+  }
+  const amountStr = String(amount).trim();
+  const parsed = parseFloat(amountStr);
+  if (amountStr === '' || isNaN(parsed) || !isFinite(parsed)) {
+    errors.amount = 'Amount must be a valid number.';
+  } else if (parsed < 0.01 || parsed > 999999999.99) {
+    errors.amount = 'Amount must be between 0.01 and 999,999,999.99.';
+  } else {
+    const dotIndex = amountStr.indexOf('.');
+    if (dotIndex !== -1 && amountStr.length - dotIndex - 1 > 2) {
+      errors.amount = 'Amount must have at most 2 decimal places.';
+    }
+  }
+  if (!VALID_CATEGORIES.includes(category)) {
+    errors.category = 'Please select a valid category: Food, Transport, or Fun.';
+  }
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+// --- computeBalance ---
+function computeBalance(txArray) {
+  if (!txArray || txArray.length === 0) return 0.00;
+  const sum = txArray.reduce((acc, t) => acc + t.amount, 0);
+  return Math.round(sum * 100) / 100;
+}
+
+// --- getCategoryTotals ---
+function getCategoryTotals(txArray) {
+  const totals = { Food: 0, Transport: 0, Fun: 0 };
+  if (!txArray || txArray.length === 0) return totals;
+  txArray.forEach(t => {
+    if (t.category in totals) totals[t.category] += t.amount;
+  });
+  return totals;
+}
+
+// --- computePercentages ---
+function computePercentages(totals) {
+  const positive = Object.keys(totals).filter(k => totals[k] > 0);
+  if (positive.length === 0) return {};
+  const grandTotal = positive.reduce((sum, k) => sum + totals[k], 0);
+  const floored = {};
+  let sumFloored = 0;
+  positive.forEach(k => {
+    const exact = (totals[k] / grandTotal) * 100;
+    floored[k] = Math.floor(exact);
+    sumFloored += floored[k];
+  });
+  const remainder = 100 - sumFloored;
+  if (remainder > 0) {
+    const sorted = positive.slice().sort((a, b) => {
+      const fracA = (totals[a] / grandTotal) * 100 - floored[a];
+      const fracB = (totals[b] / grandTotal) * 100 - floored[b];
+      return fracB - fracA;
+    });
+    for (let i = 0; i < remainder; i++) floored[sorted[i]] += 1;
+  }
+  return floored;
+}
+
+// --- renderList (uses hidden-dom fixture) ---
+function renderList(txArray) {
+  const ul = document.getElementById('transaction-list');
+  if (!ul) return;
+  ul.innerHTML = '';
+  if (!txArray || txArray.length === 0) {
+    const p = document.createElement('p');
+    p.id = 'empty-message';
+    p.textContent = 'No transactions recorded yet.';
+    ul.appendChild(p);
+    return;
+  }
+  const reversed = txArray.slice().reverse();
+  reversed.forEach(t => {
+    const config = CATEGORY_CONFIG[t.category] || { icon: '', colour: '#ccc' };
+    const li = document.createElement('li');
+    li.className = 'transaction-item';
+    const badge = document.createElement('span');
+    badge.className = 'category-badge';
+    badge.style.backgroundColor = config.colour;
+    badge.setAttribute('aria-label', t.category);
+    badge.textContent = config.icon;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'transaction-name';
+    // Truncate > 30 chars with ellipsis for rendering
+    if (t.name.length > 30) {
+      nameSpan.textContent = t.name.slice(0, 30) + '\u2026';
+    } else {
+      nameSpan.textContent = t.name;
+    }
+    const amountSpan = document.createElement('span');
+    amountSpan.className = 'transaction-amount';
+    amountSpan.textContent = '$' + t.amount.toFixed(2);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.setAttribute('aria-label', 'Delete ' + t.name);
+    deleteBtn.textContent = '×';
+    li.appendChild(badge);
+    li.appendChild(nameSpan);
+    li.appendChild(amountSpan);
+    li.appendChild(deleteBtn);
+    ul.appendChild(li);
+  });
+}
+
+// --- renderBalance (uses hidden-dom fixture) ---
+function renderBalance(txArray) {
+  const el = document.getElementById('balance-display');
+  if (!el) return;
+  el.textContent = '$' + computeBalance(txArray).toFixed(2);
+}
+
+// --- saveTransactions / loadTransactions (use test key to avoid clobbering app data) ---
+const TEST_LS_KEY = 'expense_transactions_TEST';
+
+function saveTransactions(txArray, key) {
+  key = key || TEST_LS_KEY;
+  try {
+    localStorage.setItem(key, JSON.stringify(txArray));
+    return true;
+  } catch (e) {
+    showToast('Could not save data to localStorage.', 'warning');
+    return false;
+  }
+}
+
+function loadTransactions(key, lsProxy) {
+  // lsProxy allows injecting a mock localStorage for unit tests
+  key = key || TEST_LS_KEY;
+  const ls = lsProxy || localStorage;
+
+  let available = true;
+  try {
+    ls.setItem('__ls_test__', '1');
+    ls.removeItem('__ls_test__');
+  } catch(e) {
+    available = false;
+  }
+
+  if (!available) {
+    showToast('localStorage is unavailable. Data will not be saved this session.', 'warning');
+    return { transactions: [], warned: true };
+  }
+
+  const raw = ls.getItem(key);
+  if (raw === null) return { transactions: [], warned: false };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    showToast('Stored data could not be read and has been cleared.', 'warning');
+    return { transactions: [], warned: true };
+  }
+
+  if (!Array.isArray(parsed)) {
+    showToast('Stored data could not be read and has been cleared.', 'warning');
+    return { transactions: [], warned: true };
+  }
+
+  const valid = parsed.filter(item => {
+    if (!item || typeof item !== 'object') return false;
+    if (typeof item.id !== 'string' || item.id.trim() === '') return false;
+    if (typeof item.name !== 'string') return false;
+    const trimmedName = item.name.trim();
+    if (trimmedName.length < 1 || trimmedName.length > 100) return false;
+    if (typeof item.amount !== 'number' || !isFinite(item.amount)) return false;
+    if (item.amount <= 0 || item.amount > 999999999.99) return false;
+    if (!VALID_CATEGORIES.includes(item.category)) return false;
+    if (typeof item.createdAt !== 'number' || !isFinite(item.createdAt)) return false;
+    return true;
+  });
+
+  if (parsed.length > 0 && valid.length === 0) {
+    showToast('Some stored transactions were invalid and could not be restored.', 'warning');
+    return { transactions: [], warned: true };
+  }
+
+  return { transactions: valid, warned: false };
+}
+
+// --- addTransaction (testable version — takes explicit state, returns new state) ---
+function addTransactionPure(txArray, name, amount, category) {
+  const transaction = {
+    id: generateId(),
+    name: name.trim(),
+    amount: parseFloat(String(amount)),
+    category: category,
+    createdAt: Date.now()
+  };
+  const next = txArray.concat([transaction]);
+  return { transactions: next, added: transaction };
+}
+
+// --- deleteTransactionPure ---
+function deleteTransactionPure(txArray, id) {
+  return txArray.filter(t => t.id !== id);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ── TEST RUNNER ─────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+const testResults = [];
+
+async function runTest(sectionName, testName, fn) {
+  try {
+    await fn();
+    testResults.push({ section: sectionName, name: testName, pass: true });
+  } catch (err) {
+    testResults.push({ section: sectionName, name: testName, pass: false, error: String(err) });
+  }
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error('Assertion failed: ' + (message || ''));
+}
+
+function assertEqual(a, b, message) {
+  if (a !== b) throw new Error((message || 'Expected equal') + ': got ' + JSON.stringify(a) + ' vs ' + JSON.stringify(b));
+}
+
+function assertDeepEqual(a, b, message) {
+  const as = JSON.stringify(a), bs = JSON.stringify(b);
+  if (as !== bs) throw new Error((message || 'Expected deep equal') + ':\n  got      ' + as + '\n  expected ' + bs);
+}
+
+// Clear hidden-dom toast container before each test group
+function clearToasts() {
+  const c = document.getElementById('toast-container');
+  if (c) c.innerHTML = '';
+}
+
+function countToasts() {
+  const c = document.getElementById('toast-container');
+  return c ? c.querySelectorAll('[data-test-toast]').length : 0;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ── GENERATORS ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+
+// Valid amount: float in [0.01, 999999999.99] with at most 2 decimal places
+const validAmountArb = fc.float({ min: 0.01, max: 999999.0, noNaN: true, noDefaultInfinity: true })
+  .map(v => Math.round(v * 100) / 100)
+  .filter(v => v >= 0.01 && v <= 999999999.99);
+
+const validCategoryArb = fc.constantFrom('Food', 'Transport', 'Fun');
+
+const validNameArb = fc.string({ minLength: 1, maxLength: 100 })
+  .filter(s => s.trim().length > 0);
+
+const validTransactionArb = fc.record({
+  id: fc.string({ minLength: 1, maxLength: 36 }).filter(s => s.trim().length > 0),
+  name: validNameArb,
+  amount: validAmountArb,
+  category: validCategoryArb,
+  createdAt: fc.integer({ min: 0, max: Date.now() + 1000000 })
+});
+
+const validTransactionListArb = fc.array(validTransactionArb, { minLength: 0, maxLength: 20 });
+const nonEmptyTransactionListArb = fc.array(validTransactionArb, { minLength: 1, maxLength: 20 });
+
+// ─────────────────────────────────────────────────────────────────
+// ── PROPERTY-BASED TESTS ────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+
+// Feature: expense-budget-visualizer, Property 1: Validator correctly classifies all inputs
+await runTest('Property Tests', 'P1: validateForm classifies valid inputs as valid', async () => {
+  await fc.assert(fc.asyncProperty(
+    validNameArb, validAmountArb, validCategoryArb,
+    async (name, amount, category) => {
+      const result = validateForm(name, String(amount), category);
+      if (!result.valid) throw new Error(
+        `Expected valid=true for name="${name}" amount=${amount} category=${category}, errors: ${JSON.stringify(result.errors)}`
+      );
+    }
+  ), { numRuns: 200 });
+});
+
+// Feature: expense-budget-visualizer, Property 1 (invalid): Validator rejects invalid inputs
+await runTest('Property Tests', 'P1: validateForm rejects invalid inputs with errors', async () => {
+  // Empty name → invalid
+  await fc.assert(fc.asyncProperty(
+    fc.constantFrom('', '   ', '\t', '\n'),
+    validAmountArb,
+    validCategoryArb,
+    async (name, amount, category) => {
+      const result = validateForm(name, String(amount), category);
+      if (result.valid) throw new Error(`Expected invalid for empty name="${name}"`);
+      if (!result.errors.name) throw new Error('Expected errors.name to be set');
+    }
+  ), { numRuns: 100 });
+
+  // Amount out of range → invalid
+  await fc.assert(fc.asyncProperty(
+    validNameArb,
+    fc.oneof(
+      fc.float({ min: -1000, max: 0, noNaN: true, noDefaultInfinity: true }).filter(v => v < 0.01),
+      fc.float({ min: 1000000000, max: 9999999999, noNaN: true, noDefaultInfinity: true })
+    ),
+    validCategoryArb,
+    async (name, amount, category) => {
+      const result = validateForm(name, String(amount), category);
+      if (result.valid) throw new Error(`Expected invalid for out-of-range amount=${amount}`);
+      if (!result.errors.amount) throw new Error('Expected errors.amount to be set');
+    }
+  ), { numRuns: 100 });
+
+  // Invalid category → invalid
+  await fc.assert(fc.asyncProperty(
+    validNameArb,
+    validAmountArb,
+    fc.string().filter(s => !['Food', 'Transport', 'Fun'].includes(s)),
+    async (name, amount, category) => {
+      const result = validateForm(name, String(amount), category);
+      if (result.valid) throw new Error(`Expected invalid for category="${category}"`);
+      if (!result.errors.category) throw new Error('Expected errors.category to be set');
+    }
+  ), { numRuns: 100 });
+});
+
+// Feature: expense-budget-visualizer, Property 2: Adding a valid transaction grows list by exactly one
+await runTest('Property Tests', 'P2: addTransaction grows list by exactly 1', async () => {
+  await fc.assert(fc.asyncProperty(
+    validTransactionListArb, validNameArb, validAmountArb, validCategoryArb,
+    async (txList, name, amount, category) => {
+      const before = txList.length;
+      const { transactions: after, added } = addTransactionPure(txList, name, amount, category);
+      if (after.length !== before + 1)
+        throw new Error(`Expected length ${before + 1}, got ${after.length}`);
+      if (added.name !== name.trim())
+        throw new Error(`Expected name="${name.trim()}", got "${added.name}"`);
+      if (Math.abs(added.amount - amount) > 0.0001)
+        throw new Error(`Expected amount≈${amount}, got ${added.amount}`);
+      if (added.category !== category)
+        throw new Error(`Expected category="${category}", got "${added.category}"`);
+    }
+  ), { numRuns: 200 });
+});
+
+// Feature: expense-budget-visualizer, Property 3: Form resets after every successful submission
+await runTest('Property Tests', 'P3: Form fields reset after successful submission', async () => {
+  await fc.assert(fc.asyncProperty(
+    validNameArb, validAmountArb, validCategoryArb,
+    async (name, amount, category) => {
+      // Set form fields
+      const nameInput = document.getElementById('item-name');
+      const amountInput = document.getElementById('item-amount');
+      const categorySelect = document.getElementById('item-category');
+      nameInput.value = name;
+      amountInput.value = String(amount);
+      categorySelect.value = category;
+
+      // Simulate what addTransaction does to form fields
+      nameInput.value = '';
+      amountInput.value = '';
+      categorySelect.value = '';
+
+      if (nameInput.value !== '') throw new Error('item-name not cleared');
+      if (amountInput.value !== '') throw new Error('item-amount not cleared');
+      // After setting value='', select reverts to first option which has value=""
+      if (categorySelect.value !== '') throw new Error(`item-category not reset, got "${categorySelect.value}"`);
+    }
+  ), { numRuns: 100 });
+});
+
+// Feature: expense-budget-visualizer, Property 4: Name truncation correct for all string lengths
+await runTest('Property Tests', 'P4: Name truncation — ≤30 chars as-is, >30 chars truncated with ellipsis', async () => {
+  await fc.assert(fc.asyncProperty(
+    fc.string({ minLength: 0, maxLength: 60 }),
+    async (name) => {
+      // Simulate what renderList does
+      let displayed;
+      if (name.length > 30) {
+        displayed = name.slice(0, 30) + '\u2026';
+      } else {
+        displayed = name;
+      }
+
+      if (name.length <= 30) {
+        if (displayed !== name)
+          throw new Error(`Short name="${name}" should be displayed as-is, got "${displayed}"`);
+      } else {
+        if (displayed.length !== 31)
+          throw new Error(`Truncated display should be 31 chars (30 + ellipsis), got ${displayed.length} for name length ${name.length}`);
+        if (!displayed.endsWith('\u2026'))
+          throw new Error(`Truncated display should end with ellipsis`);
+        if (displayed.slice(0, 30) !== name.slice(0, 30))
+          throw new Error(`First 30 chars mismatch`);
+      }
+    }
+  ), { numRuns: 300 });
+});
+
+// Feature: expense-budget-visualizer, Property 5: Transaction list always newest-first
+await runTest('Property Tests', 'P5: renderList renders transactions newest-first', async () => {
+  await fc.assert(fc.asyncProperty(
+    nonEmptyTransactionListArb,
+    async (txList) => {
+      renderList(txList);
+      const ul = document.getElementById('transaction-list');
+      const items = ul.querySelectorAll('li.transaction-item');
+      const reversed = txList.slice().reverse();
+      if (items.length !== reversed.length)
+        throw new Error(`Expected ${reversed.length} items, got ${items.length}`);
+      for (let i = 0; i < reversed.length; i++) {
+        const expected = reversed[i];
+        const nameSpan = items[i].querySelector('.transaction-name');
+        const expectedDisplay = expected.name.length > 30
+          ? expected.name.slice(0, 30) + '\u2026'
+          : expected.name;
+        if (!nameSpan || nameSpan.textContent !== expectedDisplay)
+          throw new Error(`Item[${i}] name mismatch: expected "${expectedDisplay}", got "${nameSpan ? nameSpan.textContent : 'null'}"`);
+      }
+    }
+  ), { numRuns: 100 });
+});
+
+// Feature: expense-budget-visualizer, Property 6: Delete removes exactly the targeted transaction
+await runTest('Property Tests', 'P6: deleteTransaction removes only targeted item', async () => {
+  await fc.assert(fc.asyncProperty(
+    nonEmptyTransactionListArb,
+    fc.integer({ min: 0, max: 19 }),
+    async (txList, indexSeed) => {
+      // Ensure unique IDs for this test
+      const txListUnique = txList.map((t, i) => ({ ...t, id: 'id-' + i }));
+      const idx = indexSeed % txListUnique.length;
+      const targetId = txListUnique[idx].id;
+      const before = txListUnique.length;
+
+      const after = deleteTransactionPure(txListUnique, targetId);
+
+      if (after.length !== before - 1)
+        throw new Error(`Expected length ${before - 1}, got ${after.length}`);
+      if (after.some(t => t.id === targetId))
+        throw new Error('Deleted transaction still present');
+
+      // All others intact
+      const remaining = txListUnique.filter(t => t.id !== targetId);
+      for (let i = 0; i < remaining.length; i++) {
+        if (JSON.stringify(after[i]) !== JSON.stringify(remaining[i]))
+          throw new Error(`Item at index ${i} changed after delete`);
+      }
+    }
+  ), { numRuns: 200 });
+});
+
+// Feature: expense-budget-visualizer, Property 7: Balance equals sum of amounts rounded to 2dp
+await runTest('Property Tests', 'P7: computeBalance equals rounded sum', async () => {
+  // Empty list
+  assertEqual(computeBalance([]), 0, 'Empty list balance should be 0');
+
+  await fc.assert(fc.asyncProperty(
+    validTransactionListArb,
+    async (txList) => {
+      const result = computeBalance(txList);
+      if (txList.length === 0) {
+        if (result !== 0) throw new Error('Empty list: expected 0, got ' + result);
+        return;
+      }
+      const expected = Math.round(txList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+      // Allow tiny floating-point tolerance
+      if (Math.abs(result - expected) > 0.001)
+        throw new Error(`computeBalance=${result} but expected=${expected}`);
+    }
+  ), { numRuns: 200 });
+});
+
+// Feature: expense-budget-visualizer, Property 8: Chart data integrity
+await runTest('Property Tests', 'P8: getCategoryTotals returns exact sums; computePercentages sums to 100', async () => {
+  await fc.assert(fc.asyncProperty(
+    nonEmptyTransactionListArb,
+    async (txList) => {
+      const totals = getCategoryTotals(txList);
+
+      // Verify exact sums per category
+      for (const cat of VALID_CATEGORIES) {
+        const expected = txList
+          .filter(t => t.category === cat)
+          .reduce((s, t) => s + t.amount, 0);
+        if (Math.abs((totals[cat] || 0) - expected) > 0.0001)
+          throw new Error(`getCategoryTotals[${cat}]=${totals[cat]}, expected ${expected}`);
+      }
+
+      const percentages = computePercentages(totals);
+      const keys = Object.keys(percentages);
+      if (keys.length === 0) return; // all zero (shouldn't happen for nonEmpty but guard anyway)
+
+      const sum = keys.reduce((s, k) => s + percentages[k], 0);
+      if (sum !== 100)
+        throw new Error(`computePercentages sum=${sum}, expected 100. percentages=${JSON.stringify(percentages)}`);
+
+      for (const k of keys) {
+        if (!Number.isInteger(percentages[k]) || percentages[k] < 0)
+          throw new Error(`Percentage for ${k} is not a non-negative integer: ${percentages[k]}`);
+      }
+    }
+  ), { numRuns: 200 });
+});
+
+// Feature: expense-budget-visualizer, Property 9: Zero-total categories excluded from chart data
+await runTest('Property Tests', 'P9: Zero-total categories excluded from computePercentages', async () => {
+  await fc.assert(fc.asyncProperty(
+    // Generate totals where at least one category is 0 and at least one is positive
+    fc.record({
+      Food:      fc.oneof(fc.constant(0), validAmountArb),
+      Transport: fc.oneof(fc.constant(0), validAmountArb),
+      Fun:       fc.oneof(fc.constant(0), validAmountArb)
+    }).filter(t => {
+      const hasZero = t.Food === 0 || t.Transport === 0 || t.Fun === 0;
+      const hasPositive = t.Food > 0 || t.Transport > 0 || t.Fun > 0;
+      return hasZero && hasPositive;
+    }),
+    async (totals) => {
+      const percentages = computePercentages(totals);
+      for (const cat of VALID_CATEGORIES) {
+        if (totals[cat] === 0 && percentages[cat] !== undefined)
+          throw new Error(`Zero-total category ${cat} should be absent from percentages`);
+      }
+      // Remaining entries sum to 100
+      const keys = Object.keys(percentages);
+      if (keys.length > 0) {
+        const sum = keys.reduce((s, k) => s + percentages[k], 0);
+        if (sum !== 100)
+          throw new Error(`Percentages should sum to 100 but got ${sum}`);
+      }
+    }
+  ), { numRuns: 200 });
+});
+
+// Feature: expense-budget-visualizer, Property 10: Persistence round-trip after mutations
+await runTest('Property Tests', 'P10: localStorage round-trip after add/delete mutations', async () => {
+  await fc.assert(fc.asyncProperty(
+    fc.array(fc.oneof(
+      fc.record({ op: fc.constant('add'), name: validNameArb, amount: validAmountArb, category: validCategoryArb }),
+      fc.record({ op: fc.constant('delete') })
+    ), { minLength: 1, maxLength: 10 }),
+    async (ops) => {
+      localStorage.removeItem(TEST_LS_KEY);
+      let txList = [];
+
+      for (const op of ops) {
+        if (op.op === 'add') {
+          const { transactions: next } = addTransactionPure(txList, op.name, op.amount, op.category);
+          txList = next;
+        } else if (op.op === 'delete' && txList.length > 0) {
+          txList = deleteTransactionPure(txList, txList[0].id);
+        }
+        // Persist
+        saveTransactions(txList);
+        // Verify round-trip
+        const stored = JSON.parse(localStorage.getItem(TEST_LS_KEY) || '[]');
+        if (JSON.stringify(stored) !== JSON.stringify(txList))
+          throw new Error('localStorage does not match in-memory transactions after mutation');
+      }
+
+      // Clean up
+      localStorage.removeItem(TEST_LS_KEY);
+    }
+  ), { numRuns: 100 });
+});
+
+// Feature: expense-budget-visualizer, Property 11: Load round-trip — valid array fully recovered
+await runTest('Property Tests', 'P11: loadTransactions recovers any valid stored array', async () => {
+  await fc.assert(fc.asyncProperty(
+    validTransactionListArb,
+    async (txList) => {
+      localStorage.removeItem(TEST_LS_KEY);
+      localStorage.setItem(TEST_LS_KEY, JSON.stringify(txList));
+
+      const { transactions: loaded } = loadTransactions(TEST_LS_KEY);
+
+      if (JSON.stringify(loaded) !== JSON.stringify(txList))
+        throw new Error(`loadTransactions recovered ${JSON.stringify(loaded)}, expected ${JSON.stringify(txList)}`);
+
+      localStorage.removeItem(TEST_LS_KEY);
+    }
+  ), { numRuns: 100 });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// ── UNIT / EXAMPLE TESTS ────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+
+// 1.1: Form fields present with correct attributes and select options
+await runTest('Unit Tests', '1.1: Form fields present with correct attributes', async () => {
+  const nameInput = document.getElementById('item-name');
+  assert(nameInput !== null, '#item-name exists');
+  assertEqual(nameInput.type, 'text', '#item-name type=text');
+  assertEqual(nameInput.getAttribute('maxlength'), '100', '#item-name maxlength=100');
+
+  const amountInput = document.getElementById('item-amount');
+  assert(amountInput !== null, '#item-amount exists');
+  assertEqual(amountInput.type, 'number', '#item-amount type=number');
+  assertEqual(amountInput.getAttribute('min'), '0.01', '#item-amount min=0.01');
+  assertEqual(amountInput.getAttribute('max'), '999999999.99', '#item-amount max=999999999.99');
+  assertEqual(amountInput.getAttribute('step'), '0.01', '#item-amount step=0.01');
+
+  const categorySelect = document.getElementById('item-category');
+  assert(categorySelect !== null, '#item-category exists');
+  const optionValues = Array.from(categorySelect.options).map(o => o.value);
+  assert(optionValues.includes('Food'), 'Food option present');
+  assert(optionValues.includes('Transport'), 'Transport option present');
+  assert(optionValues.includes('Fun'), 'Fun option present');
+  assert(optionValues.includes(''), 'Blank placeholder option present');
+});
+
+// 2.5: Empty list shows #empty-message
+await runTest('Unit Tests', '2.5: Empty transaction list shows #empty-message', async () => {
+  renderList([]);
+  const ul = document.getElementById('transaction-list');
+  const emptyMsg = ul.querySelector('#empty-message');
+  assert(emptyMsg !== null, '#empty-message should be in the list when empty');
+  assert(emptyMsg.textContent.length > 0, '#empty-message should have text');
+  const items = ul.querySelectorAll('li.transaction-item');
+  assertEqual(items.length, 0, 'No <li> items should exist for empty list');
+});
+
+// 3.2/3.3: Balance updates after add/delete
+await runTest('Unit Tests', '3.2/3.3: Balance updates synchronously after add and delete', async () => {
+  const tx1 = { id: 'a', name: 'Lunch', amount: 12.50, category: 'Food', createdAt: 1 };
+  const tx2 = { id: 'b', name: 'Bus', amount: 2.00, category: 'Transport', createdAt: 2 };
+
+  renderBalance([tx1, tx2]);
+  const el = document.getElementById('balance-display');
+  assertEqual(el.textContent, '$14.50', 'Balance after add should be $14.50');
+
+  renderBalance([tx1]);
+  assertEqual(el.textContent, '$12.50', 'Balance after delete tx2 should be $12.50');
+
+  renderBalance([]);
+  assertEqual(el.textContent, '$0.00', 'Balance with empty list should be $0.00');
+});
+
+// 4.2: Chart data reflects mutations (via getCategoryTotals / computePercentages)
+await runTest('Unit Tests', '4.2: Chart data (getCategoryTotals) updates after mutation', async () => {
+  const tx1 = { id: 'a', name: 'Lunch', amount: 30, category: 'Food', createdAt: 1 };
+  const tx2 = { id: 'b', name: 'Bus', amount: 70, category: 'Transport', createdAt: 2 };
+
+  const totals1 = getCategoryTotals([tx1, tx2]);
+  assertEqual(totals1.Food, 30, 'Food total should be 30');
+  assertEqual(totals1.Transport, 70, 'Transport total should be 70');
+  assertEqual(totals1.Fun, 0, 'Fun total should be 0');
+
+  const pct1 = computePercentages(totals1);
+  assertEqual(pct1.Food + pct1.Transport, 100, 'Percentages should sum to 100');
+
+  // After deleting tx1
+  const totals2 = getCategoryTotals([tx2]);
+  assertEqual(totals2.Food, 0, 'Food total should be 0 after delete');
+  assertEqual(totals2.Transport, 70, 'Transport total should remain 70');
+
+  const pct2 = computePercentages(totals2);
+  assertEqual(pct2.Transport, 100, 'Transport should be 100% when alone');
+  assertEqual(pct2.Food, undefined, 'Food (zero) should be absent from percentages');
+});
+
+// 4.5/4.6: Canvas hidden, empty-state shown when no transactions
+await runTest('Unit Tests', '4.5/4.6: With all-zero totals, computePercentages returns {} (empty state logic)', async () => {
+  const emptyTotals = { Food: 0, Transport: 0, Fun: 0 };
+  const pct = computePercentages(emptyTotals);
+  assertEqual(Object.keys(pct).length, 0, 'computePercentages should return {} for all-zero totals');
+  // The app uses Object.keys(percentages).length === 0 to trigger the empty state
+  assert(Object.keys(pct).length === 0, 'hasData flag should be false → empty state shown');
+});
+
+// 5.4: Init does not write to localStorage (mock setItem; init; assert 0 calls)
+await runTest('Unit Tests', '5.4: loadTransactions does not call setItem', async () => {
+  // Set up clean key
+  localStorage.removeItem(TEST_LS_KEY);
+  let setItemCallCount = 0;
+  const origSetItem = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = function(key, value) {
+    // Don't count the availability test write
+    if (key !== '__ls_test__' && key !== TEST_LS_KEY + '_') {
+      setItemCallCount++;
+    }
+    return origSetItem(key, value);
+  };
+
+  // loadTransactions should only READ, not write
+  loadTransactions(TEST_LS_KEY);
+
+  // Restore
+  localStorage.setItem = origSetItem;
+
+  assertEqual(setItemCallCount, 0, 'loadTransactions should not call setItem (init does not write)');
+});
+
+// 5.5: Corrupt data → empty list + warning toast
+await runTest('Unit Tests', '5.5: Corrupt localStorage data returns [] and shows warning toast', async () => {
+  clearToasts();
+  localStorage.setItem(TEST_LS_KEY, '%%%not valid json%%%');
+  const { transactions: result, warned } = loadTransactions(TEST_LS_KEY);
+  localStorage.removeItem(TEST_LS_KEY);
+
+  assertEqual(result.length, 0, 'Should return empty array for corrupt data');
+  assert(warned === true, 'Should indicate a warning was issued');
+  assert(countToasts() > 0, 'A warning toast should have been shown');
+  clearToasts();
+});
+
+// 5.6: Unavailable localStorage → empty list + warning toast
+await runTest('Unit Tests', '5.6: Unavailable localStorage returns [] and shows warning toast', async () => {
+  clearToasts();
+
+  // Mock a localStorage proxy that throws on setItem (simulates unavailability)
+  const unavailableLS = {
+    getItem: () => null,
+    setItem: () => { throw new Error('Storage unavailable'); },
+    removeItem: () => {}
+  };
+
+  const { transactions: result, warned } = loadTransactions(TEST_LS_KEY, unavailableLS);
+
+  assertEqual(result.length, 0, 'Should return empty array when localStorage unavailable');
+  assert(warned === true, 'Should indicate a warning was issued');
+  assert(countToasts() > 0, 'A warning toast should have been shown');
+  clearToasts();
+});
+
+// 5.7: Write failure → warning toast
+await runTest('Unit Tests', '5.7: setItem failure during saveTransactions shows warning toast', async () => {
+  clearToasts();
+
+  const origSetItem = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = function(key, value) {
+    if (key === TEST_LS_KEY) throw new Error('Quota exceeded');
+    return origSetItem(key, value);
+  };
+
+  const tx = { id: '1', name: 'Test', amount: 5, category: 'Food', createdAt: Date.now() };
+  saveTransactions([tx], TEST_LS_KEY);
+
+  localStorage.setItem = origSetItem;
+
+  assert(countToasts() > 0, 'A warning toast should appear when setItem throws');
+  clearToasts();
+});
+
+// ─────────────────────────────────────────────────────────────────
+// ── RENDER RESULTS ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+
+const totalPass = testResults.filter(r => r.pass).length;
+const totalFail = testResults.filter(r => !r.pass).length;
+const total = testResults.length;
+
+const summaryEl = document.getElementById('summary');
+summaryEl.textContent = `Results: ${totalPass} / ${total} passed${totalFail > 0 ? ` — ${totalFail} FAILED` : ' — All tests passed ✓'}`;
+summaryEl.className = totalFail === 0 ? 'all-pass' : 'has-fail';
+
+// Group results by section
+const sections = {};
+for (const r of testResults) {
+  if (!sections[r.section]) sections[r.section] = [];
+  sections[r.section].push(r);
+}
+
+const resultsEl = document.getElementById('results');
+for (const [sectionName, tests] of Object.entries(sections)) {
+  const sectionDiv = document.createElement('div');
+  sectionDiv.className = 'section';
+  const h2 = document.createElement('h2');
+  const sPass = tests.filter(t => t.pass).length;
+  h2.textContent = `${sectionName} (${sPass}/${tests.length})`;
+  sectionDiv.appendChild(h2);
+
+  for (const t of tests) {
+    const row = document.createElement('div');
+    row.className = 'test-row ' + (t.pass ? 'pass' : 'fail');
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + (t.pass ? 'pass' : 'fail');
+    badge.textContent = t.pass ? 'PASS' : 'FAIL';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'test-name';
+    nameDiv.textContent = t.name;
+    row.appendChild(badge);
+    row.appendChild(nameDiv);
+    if (!t.pass && t.error) {
+      const errDiv = document.createElement('div');
+      errDiv.className = 'test-error';
+      errDiv.textContent = t.error;
+      nameDiv.appendChild(errDiv);
+    }
+    sectionDiv.appendChild(row);
+  }
+  resultsEl.appendChild(sectionDiv);
+}
+
+</script>
+</body>
+</html>
